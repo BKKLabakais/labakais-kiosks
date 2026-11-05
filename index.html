@@ -1,0 +1,287 @@
+
+<!DOCTYPE html>
+<html lang="lv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LABĀKAIS — Apmeklējumu reģistrācija</title>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 20px;
+  background: #111;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+
+h1 { margin: 15px 0 5px; }
+.subtitle { color: #aaa; margin-bottom: 25px; }
+
+#reader {
+  width: 100%;
+  max-width: 420px;
+  margin: 20px auto;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#result {
+  max-width: 500px;
+  margin: 20px auto;
+  padding: 25px 15px;
+  border-radius: 12px;
+  background: #292929;
+}
+
+#name {
+  font-size: 25px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+#status {
+  font-size: 19px;
+  font-weight: bold;
+}
+
+#message {
+  margin-top: 10px;
+  font-size: 15px;
+}
+
+.green { background: #14532d !important; }
+.yellow { background: #713f12 !important; }
+.red { background: #7f1d1d !important; }
+
+button {
+  padding: 15px 25px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+#restart {
+  background: white;
+  color: black;
+  display: none;
+  margin: 15px auto;
+}
+
+#info {
+  color: #aaa;
+  font-size: 13px;
+  margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>LABĀKAIS</h1>
+<div class="subtitle">BOKSA KLUBS — Apmeklējumu reģistrācija</div>
+
+<div id="result">
+  <div id="name">Sveicināts!</div>
+  <div id="status">Noskenē savu QR karti</div>
+  <div id="message"></div>
+</div>
+
+<div id="reader"></div>
+
+<button id="restart" onclick="resumeScanner()">
+  TURPINĀT SKENĒŠANU
+</button>
+
+<div id="info">Labākais Boksa Klubs</div>
+
+<script>
+const API_URL =
+"https://script.google.com/macros/s/AKfycbyMdOMQhy5SamtlnpZW4IDnb2aTB3wbKk_rYFZZAiEghuer1Pt1Q1ipBPm77auP_72P/exec";
+
+let DEVICE_KEY = "";
+let scanner = null;
+let busy = false;
+
+function jsonp(params) {
+  return new Promise((resolve, reject) => {
+    const callbackName =
+      "lbCallback_" + Date.now() + "_" +
+      Math.floor(Math.random() * 100000);
+
+    const script = document.createElement("script");
+
+    const query = new URLSearchParams({
+      ...params,
+      callback: callbackName
+    });
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Savienojuma noildze."));
+    }, 15000);
+
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[callbackName];
+      script.remove();
+    }
+
+    window[callbackName] = function(data) {
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = function() {
+      cleanup();
+      reject(new Error("Neizdevās savienoties ar serveri."));
+    };
+
+    script.src = API_URL + "?" + query.toString();
+    document.body.appendChild(script);
+  });
+}
+
+function showResult(name, status, message, color) {
+  document.getElementById("result").className = color;
+  document.getElementById("name").textContent = name;
+  document.getElementById("status").textContent = status;
+  document.getElementById("message").textContent = message;
+}
+
+async function initialize() {
+  try {
+    showResult(
+      "LABĀKAIS",
+      "Savienojamies ar sistēmu...",
+      "",
+      ""
+    );
+
+    const config = await jsonp({ action: "config" });
+
+    if (!config.deviceKey) {
+      throw new Error("Nav saņemta kioska atslēga.");
+    }
+
+    DEVICE_KEY = config.deviceKey;
+
+    showResult(
+      "Sveicināts!",
+      "Noskenē savu QR karti",
+      "Sistēma gatava darbam.",
+      ""
+    );
+
+    scanner = new Html5Qrcode("reader");
+
+    await scanner.start(
+      { facingMode: "environment" },
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 }
+      },
+      onScanSuccess,
+      () => {}
+    );
+
+  } catch (error) {
+    showResult(
+      "Kļūda!",
+      "Neizdevās ieslēgt kameru",
+      error.message,
+      "red"
+    );
+  }
+}
+
+async function onScanSuccess(decodedText) {
+  if (busy) return;
+
+  busy = true;
+
+  showResult(
+    "QR kods nolasīts",
+    "Pārbaudām abonementu...",
+    "Lūdzu, uzgaidi.",
+    ""
+  );
+
+  try {
+    const response = await jsonp({
+      action: "checkin",
+      token: decodedText,
+      deviceKey: DEVICE_KEY
+    });
+
+    if (response.duplicate) {
+      showResult(
+        response.name,
+        "JAU REĢISTRĒTS",
+        response.message,
+        "yellow"
+      );
+    } else if (!response.ok) {
+      showResult(
+        "UZMANĪBU!",
+        "QR KODS NAV DERĪGS",
+        response.message,
+        "red"
+      );
+    } else {
+      let color = "green";
+
+      if (response.status === "Maksājuma termiņš") {
+        color = "yellow";
+      } else if (
+        response.status === "Beidzies" ||
+        response.status === "Nav abonementa"
+      ) {
+        color = "red";
+      }
+
+      showResult(
+        response.name,
+        response.status,
+        response.message,
+        color
+      );
+    }
+
+  } catch (error) {
+    showResult(
+      "SAVIENOJUMA KĻŪDA",
+      "Neizdevās reģistrēt apmeklējumu",
+      error.message,
+      "red"
+    );
+  }
+
+  document.getElementById("restart").style.display = "block";
+}
+
+async function resumeScanner() {
+  document.getElementById("restart").style.display = "none";
+
+  showResult(
+    "Sveicināts!",
+    "Noskenē savu QR karti",
+    "",
+    ""
+  );
+
+  busy = false;
+}
+
+initialize();
+</script>
+
+</body>
+</html>

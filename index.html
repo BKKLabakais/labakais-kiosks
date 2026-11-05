@@ -183,7 +183,7 @@ async function initialize() {
     scanner = new Html5Qrcode("reader");
 
     await scanner.start(
-      { facingMode: "environment" },
+      { facingMode: "user" },
       {
         fps: 10,
         qrbox: { width: 250, height: 250 }
